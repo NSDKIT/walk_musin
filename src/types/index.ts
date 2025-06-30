@@ -49,7 +49,7 @@ export interface SunoTrack {
   bpm: number;
   audioUrl?: string;
   imageUrl?: string;
-  status: 'generating' | 'completed' | 'failed';
+  status: 'pending' | 'generating' | 'completed' | 'failed';
   jobId?: string;
   createdAt: Date;
   walkingData: WalkingData;

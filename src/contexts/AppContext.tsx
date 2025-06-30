@@ -226,7 +226,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const interval = setInterval(() => {
       checkCompletedTracks();
-    }, 30000); // Check every 30 seconds
+    }, 5000); // Check every 5 seconds
 
     return () => clearInterval(interval);
   }, []);
@@ -440,7 +440,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         genre: style.toLowerCase(),
         mood: 'uplifting',
         bpm: Math.round(walkData.avgSpeed * 20),
-        status: 'generating',
+        status: 'pending', // Initial status is pending
         createdAt: new Date(),
         walkingData: walkData,
         environmentData,
@@ -463,9 +463,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       // Send generation request to Suno API
       try {
-        console.log('Calling Suno API with:', { prompt, isInstrumental });
+        console.log('Calling Suno API with:', { prompt, style, isInstrumental });
         
         const sunoResponse = await sunoApi.generateMusic(prompt, {
+          style,
           instrumental: isInstrumental,
           title: initialTrack.title,
         });
@@ -473,11 +474,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         console.log('Suno API response:', sunoResponse);
         
         if (sunoResponse && sunoResponse.length > 0) {
-          // The localhost API returns multiple tracks, we'll use the first one
           const sunoTrack = sunoResponse[0];
           
-          if (!sunoTrack || !sunoTrack.id) {
-            console.error('Suno API response missing valid ID:', sunoTrack);
+          // Check for id
+          const jobId = sunoTrack.id;
+          
+          if (!sunoTrack || !jobId) {
+            console.error('Suno API response missing valid job ID:', sunoTrack);
             
             const updates = { status: 'failed' as const };
             dispatch({
@@ -494,19 +497,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             return;
           }
           
-          // Update track with Suno track ID and initial data
+          // Update track with job ID - keep status as "generating"
           const updates = {
             title: sunoTrack.title || initialTrack.title,
-            jobId: sunoTrack.id,
-            // Check if audio is already available
-            ...(sunoTrack.audio_url && {
-              status: 'completed' as const,
-              audioUrl: sunoTrack.audio_url,
-              imageUrl: sunoTrack.image_url,
-            }),
+            jobId: jobId,
+            // Keep status as "generating" until we check for completion
           };
 
-          console.log('Updating track with Suno data:', updates);
+          console.log('Updating track with job ID:', updates);
 
           dispatch({
             type: 'UPDATE_TRACK',
@@ -525,12 +523,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             }
           }
 
-          // If audio is not ready yet, start polling
-          if (!sunoTrack.audio_url) {
-            console.log('Audio not ready yet, will check status periodically');
-          } else {
-            console.log('Music generation completed immediately!');
-          }
+          console.log('Music generation request sent successfully. Track will be updated when completed.');
         } else {
           console.error('Suno API returned empty or invalid response');
           
@@ -555,9 +548,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           let userMessage = 'Music generation failed. ';
           
           if (error.isCreditsError) {
-            userMessage = 'Insufficient credits available. Please check your Suno API account.';
+            userMessage = 'Insufficient credits available. Please check your Suno API account and top up credits to continue generating music.';
           } else if (error.isConfigError) {
-            userMessage = 'Suno API connection error. Please make sure the local server is running on localhost:3000.';
+            userMessage = 'Suno API configuration error. Please check your API key settings.';
           } else {
             userMessage += error.message;
           }
@@ -592,16 +585,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       console.log('Checking for completed tracks...');
       
-      // Only check individual generating tracks with valid job IDs
+      // Find tracks that are currently generating and have a job ID
       const generatingTracks = state.tracks.filter(track => 
-        track.status === 'generating' && track.jobId && track.jobId !== 'undefined'
+        (track.status === 'pending' || track.status === 'generating') && track.jobId
       );
       
       if (generatingTracks.length === 0) {
-        console.log('No generating tracks with valid job IDs to check');
+        console.log('No generating tracks to check');
         return;
       }
-
+      
       console.log(`Found ${generatingTracks.length} generating tracks to check`);
       
       // Check each generating track individually
@@ -615,16 +608,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           if (statusResponse && statusResponse.length > 0) {
             const sunoTrack = statusResponse[0];
             
-            // Check if the track is completed
-            if (sunoTrack.status === 'complete' && sunoTrack.audio_url) {
-              console.log('Track completed:', track.id, sunoTrack);
+            let newStatus: SunoTrack['status'] = 'generating'; // Default to generating
+            if (sunoTrack.status === 1) {
+              newStatus = 'completed';
+            } else if (sunoTrack.status === 2) {
+              newStatus = 'failed';
+            }
+
+            // Only update if status has changed or audioUrl is now available
+            if (track.status !== newStatus || (newStatus === 'completed' && !track.audioUrl && sunoTrack.audio_url)) {
+              console.log(`Track ${track.id} status changed to ${newStatus}`);
               
-              const updates = {
-                status: 'completed' as const,
-                audioUrl: sunoTrack.audio_url,
-                imageUrl: sunoTrack.image_url,
-                title: sunoTrack.title || track.title,
+              const updates: Partial<SunoTrack> = {
+                status: newStatus,
               };
+
+              if (sunoTrack.audio_url) {
+                updates.audioUrl = sunoTrack.audio_url;
+              }
+              if (sunoTrack.image_url) {
+                updates.imageUrl = sunoTrack.image_url;
+              }
+              if (sunoTrack.title) {
+                updates.title = sunoTrack.title;
+              }
 
               dispatch({
                 type: 'UPDATE_TRACK',
@@ -642,37 +649,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                   console.error('Failed to update completed track in database:', error);
                 }
               }
-
-              console.log(`Track ${track.title} completed successfully!`);
-            } else if (sunoTrack.status === 'error') {
-              console.log('Track failed:', track.id, sunoTrack);
-              
-              const updates = { status: 'failed' as const };
-              dispatch({
-                type: 'UPDATE_TRACK',
-                payload: {
-                  id: track.id,
-                  updates,
-                },
-              });
-
-              // Update in database
-              if (isSupabaseConfigured && state.isAuthenticated) {
-                try {
-                  await database.updateMusicTrack(track.id, updates);
-                } catch (error) {
-                  console.error('Failed to update failed track in database:', error);
-                }
-              }
             }
-            // If status is still 'generating', keep checking
           }
         } catch (error) {
           console.error(`Failed to check status for track ${track.id}:`, error);
           // Continue checking other tracks even if one fails
         }
       }
-      
     } catch (error) {
       console.error('Failed to check completed tracks:', error);
       // Don't show error to user for background checks

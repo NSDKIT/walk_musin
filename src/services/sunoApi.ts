@@ -1,7 +1,12 @@
 export interface SunoGenerateRequest {
   prompt: string;
-  make_instrumental?: boolean;
-  wait_audio?: boolean;
+  style?: string;
+  title?: string;
+  customMode?: boolean;
+  instrumental?: boolean;
+  model?: string;
+  negativeTags?: string;
+  callBackUrl?: string;
 }
 
 export interface SunoGenerateResponse {
@@ -13,7 +18,23 @@ export interface SunoGenerateResponse {
   video_url?: string;
   created_at: string;
   model_name: string;
-  status: string;
+  status: number; // 0: pending, 1: success, 2: failed
+  gpt_description_prompt?: string;
+  prompt?: string;
+  type: string;
+  tags?: string;
+}
+
+export interface SunoRecordInfo {
+  id: string;
+  title: string;
+  image_url?: string;
+  lyric?: string;
+  audio_url?: string;
+  video_url?: string;
+  created_at: string;
+  model_name: string;
+  status: 'PENDING' | 'TEXT_SUCCESS' | 'FIRST_SUCCESS' | 'SUCCESS' | 'CREATE_TASK_FAILED' | 'GENERATE_AUDIO_FAILED' | 'CALLBACK_EXCEPTION' | 'SENSITIVE_WORD_ERROR';
   gpt_description_prompt?: string;
   prompt?: string;
   type: string;
@@ -33,10 +54,14 @@ export class SunoApiError extends Error {
 }
 
 class SunoApiService {
-  private baseUrl = 'http://localhost:3000';
+  private apiKey: string;
+  private baseUrl = 'https://api.sunoapi.org';
 
   constructor() {
-    console.log('Suno API Service initialized with localhost:3000');
+    this.apiKey = import.meta.env.VITE_SUNOAPI_ORG_API_KEY || '';
+    if (!this.apiKey) {
+      console.warn('Suno API key not found. Music generation will use mock data.');
+    }
   }
 
   async generateMusic(prompt: string, options?: {
@@ -44,22 +69,38 @@ class SunoApiService {
     instrumental?: boolean;
     title?: string;
   }): Promise<SunoGenerateResponse[]> {
+    if (!this.apiKey) {
+      throw new SunoApiError(
+        'Suno API key not configured. Please add your API key to continue generating music.',
+        'NO_API_KEY',
+        false,
+        true
+      );
+    }
+
     try {
       const requestBody: SunoGenerateRequest = {
         prompt,
-        make_instrumental: options?.instrumental ?? false,
-        wait_audio: false, // Don't wait for audio, we'll poll for it
+        style: options?.style || 'Acoustic',
+        title: options?.title || `Walking Track ${new Date().toLocaleDateString('ja-JP')}`,
+        customMode: true,
+        instrumental: options?.instrumental ?? false,
+        model: 'V3_5',
+        negativeTags: 'Heavy Metal, Aggressive, Loud',
+        callBackUrl: 'https://example.com/suno-callback',
       };
 
       console.log('Sending request to Suno API:', {
-        url: `${this.baseUrl}/api/generate`,
+        url: `${this.baseUrl}/api/v1/generate`,
         body: requestBody
       });
 
-      const response = await fetch(`${this.baseUrl}/api/generate`, {
+      const response = await fetch(`${this.baseUrl}/api/v1/generate`, {
         method: 'POST',
         headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
         },
         body: JSON.stringify(requestBody),
       });
@@ -70,10 +111,19 @@ class SunoApiService {
         const errorText = await response.text();
         console.error('Suno API error response:', errorText);
         
-        if (response.status === 503) {
+        // Handle specific error cases
+        if (errorText.includes('insufficient') || errorText.includes('credits') || errorText.includes('top up')) {
           throw new SunoApiError(
-            'Suno API service is not available. Please make sure the local server is running on localhost:3000.',
-            'SERVICE_UNAVAILABLE',
+            'Insufficient credits available. Please check your Suno API account and top up credits to continue generating music.',
+            'INSUFFICIENT_CREDITS',
+            true
+          );
+        }
+        
+        if (response.status === 401) {
+          throw new SunoApiError(
+            'Invalid API key. Please check your Suno API configuration.',
+            'INVALID_API_KEY',
             false,
             true
           );
@@ -82,149 +132,235 @@ class SunoApiService {
         throw new SunoApiError(`Suno API error: ${response.status} - ${errorText}`, `HTTP_${response.status}`);
       }
 
-      const data = await response.json();
-      console.log('Suno API response data:', data);
+      const rawResponse = await response.json();
+      console.log('Suno API raw response data:', rawResponse);
 
-      // The localhost API returns an array of tracks
-      return Array.isArray(data) ? data : [data];
+      // Check for API-level errors embedded in the response
+      if (rawResponse && rawResponse.code !== 200) {
+        const errorMessage = rawResponse.msg || 'Unknown API error';
+        console.error('Suno API generate error:', errorMessage);
+        
+        // Handle specific error messages
+        if (errorMessage.includes('insufficient') || errorMessage.includes('credits') || errorMessage.includes('top up')) {
+          throw new SunoApiError(
+            'Insufficient credits available. Please check your Suno API account and top up credits to continue generating music.',
+            'INSUFFICIENT_CREDITS',
+            true
+          );
+        }
+        
+        throw new SunoApiError(errorMessage, rawResponse.code?.toString());
+      }
+
+      if (rawResponse && rawResponse.code === 200 && rawResponse.data) {
+        const data = rawResponse.data;
+        console.log('Suno API actual track data:', data);
+        // The generate endpoint for sunoapi.org seems to return an array
+        return Array.isArray(data) ? data : [data]; // Ensure it's always an array
+      } else {
+        console.error('Suno API generate error: Unexpected response structure', rawResponse);
+        throw new SunoApiError(`Unexpected response structure - ${JSON.stringify(rawResponse)}`, 'INVALID_RESPONSE');
+      }
 
     } catch (error) {
       console.error('Suno API error:', error);
       if (error instanceof SunoApiError) {
         throw error;
       }
-      
-      // Check if it's a network error (server not running)
-      if (error instanceof TypeError && error.message.includes('fetch')) {
-        throw new SunoApiError(
-          'Cannot connect to Suno API server. Please make sure the local server is running on localhost:3000.',
-          'CONNECTION_ERROR',
-          false,
-          true
-        );
-      }
-      
       throw new SunoApiError(`Network or unexpected error: ${error instanceof Error ? error.message : 'Unknown error'}`, 'NETWORK_ERROR');
     }
   }
 
   /**
-   * Get audio information for multiple track IDs
+   * 完成した音楽を取得する（新しいエンドポイント）
    */
-  async getAudioInformation(audioIds: string[]): Promise<SunoGenerateResponse[]> {
+  async getCompletedTracks(): Promise<SunoRecordInfo[]> {
+    if (!this.apiKey) {
+      throw new SunoApiError(
+        'Suno API key not configured',
+        'NO_API_KEY',
+        false,
+        true
+      );
+    }
+
     try {
-      const ids = audioIds.join(',');
-      console.log(`Fetching audio information for IDs: ${ids}`);
+      console.log('Fetching completed tracks from Suno API...');
       
-      const response = await fetch(`${this.baseUrl}/api/get?ids=${ids}`, {
+      const response = await fetch(`${this.baseUrl}/api/v1/generate/record-info`, {
         method: 'GET',
         headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
           'Accept': 'application/json',
         },
       });
 
-      console.log(`Audio info response status: ${response.status}`);
+      console.log('Completed tracks response status:', response.status);
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`Audio info API error: ${response.status} - ${errorText}`);
+        console.error('Suno API completed tracks error:', errorText);
+        
+        if (response.status === 401) {
+          throw new SunoApiError(
+            'Invalid API key. Please check your Suno API configuration.',
+            'INVALID_API_KEY',
+            false,
+            true
+          );
+        }
+        
+        throw new SunoApiError(`Failed to fetch completed tracks: ${response.status} - ${errorText}`, `HTTP_${response.status}`);
+      }
+
+      const rawResponse = await response.json();
+      console.log('Completed tracks raw response:', rawResponse);
+
+      // Check for API-level errors embedded in the response
+      if (rawResponse && rawResponse.code !== 200) {
+        const errorMessage = rawResponse.msg || 'Unknown API error';
+        console.error('Suno API completed tracks error:', errorMessage);
+        throw new SunoApiError(errorMessage, rawResponse.code?.toString());
+      }
+
+      if (rawResponse && rawResponse.code === 200 && rawResponse.data) {
+        const data = rawResponse.data;
+        console.log('Completed tracks data:', data);
+        
+        // Filter only completed tracks (SUCCESS status)
+        const completedTracks = Array.isArray(data) 
+          ? data.filter((track: SunoRecordInfo) => track.status === 'SUCCESS')
+          : (data.status === 'SUCCESS' ? [data] : []);
+        
+        console.log('Filtered completed tracks:', completedTracks);
+        return completedTracks;
+      } else {
+        console.warn('No completed tracks data found in response');
         return [];
       }
 
-      const data = await response.json();
-      console.log(`Audio info response data:`, data);
-
-      return Array.isArray(data) ? data : [data];
-
     } catch (error) {
-      console.error(`Audio info fetch error:`, error);
-      return [];
+      console.error('Suno API completed tracks error:', error);
+      if (error instanceof SunoApiError) {
+        throw error;
+      }
+      throw new SunoApiError(`Network or unexpected error: ${error instanceof Error ? error.message : 'Unknown error'}`, 'NETWORK_ERROR');
     }
   }
 
-  /**
-   * Check status of multiple tracks using their IDs
-   */
   async getGenerationStatus(ids: string[]): Promise<SunoGenerateResponse[]> {
-    try {
-      console.log('Checking generation status for IDs:', ids);
-      
-      // Use the audio information endpoint to check status
-      const results = await this.getAudioInformation(ids);
-      
-      // Convert status to our standard format
-      return results.map(track => ({
-        ...track,
-        status: this.convertStatusToStandard(track.status),
-      }));
-
-    } catch (error) {
-      console.error('Failed to get generation status:', error);
-      throw new SunoApiError(`Status check error: ${error instanceof Error ? error.message : 'Unknown error'}`, 'STATUS_ERROR');
+    if (!this.apiKey) {
+      throw new SunoApiError(
+        'Suno API key not configured',
+        'NO_API_KEY',
+        false,
+        true
+      );
     }
-  }
 
-  /**
-   * Convert localhost API status to standard status format
-   */
-  private convertStatusToStandard(status: string): string {
-    switch (status.toLowerCase()) {
-      case 'streaming':
-      case 'complete':
-      case 'completed':
-        return 'complete';
-      case 'pending':
-      case 'processing':
-      case 'generating':
-        return 'generating';
-      case 'error':
-      case 'failed':
-        return 'error';
-      default:
-        return 'generating';
-    }
-  }
-
-  /**
-   * Get completed tracks - uses the audio information endpoint
-   */
-  async getCompletedTracks(): Promise<SunoGenerateResponse[]> {
-    console.log('getCompletedTracks called - this requires specific track IDs for localhost API');
-    // This method would need specific track IDs to work with the localhost API
-    // For now, we'll return an empty array and rely on individual track status checking
-    return [];
-  }
-
-  /**
-   * Get quota information
-   */
-  async getCreditsInfo(): Promise<{ credits_left: number; period: string; monthly_limit: number; monthly_usage: number }> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/get_limit`, {
+      const jobId = ids[0]; // Assuming polling one ID at a time
+      const url = `${this.baseUrl}/api/v1/get?ids=${jobId}`;
+      
+      console.log(`Checking status for job ID: ${jobId} at URL: ${url}`);
+      
+      const response = await fetch(url, {
         method: 'GET',
         headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Accept': 'application/json',
+        },
+      });
+
+      console.log(`Response status: ${response.status}`);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Suno API status error:', errorText);
+        
+        if (response.status === 401) {
+          throw new SunoApiError(
+            'Invalid API key. Please check your Suno API configuration.',
+            'INVALID_API_KEY',
+            false,
+            true
+          );
+        }
+        
+        throw new SunoApiError(`Status check error: ${response.status} - ${errorText}`, `HTTP_${response.status}`);
+      }
+
+      const rawResponse = await response.json();
+      console.log('Status check raw response:', rawResponse);
+
+      // Check for API-level errors embedded in the response
+      if (rawResponse && rawResponse.code !== 200) {
+        const errorMessage = rawResponse.msg || 'Unknown API error';
+        console.error('Suno API status error:', errorMessage);
+        throw new SunoApiError(errorMessage, rawResponse.code?.toString());
+      }
+
+      if (rawResponse && rawResponse.code === 200 && rawResponse.data) {
+        const data = rawResponse.data;
+        console.log('Status check data:', data);
+        return Array.isArray(data) ? data : [data];
+      } else {
+        console.warn('No status data found in response');
+        return [];
+      }
+
+    } catch (error) {
+      console.error('Suno API status check error:', error);
+      if (error instanceof SunoApiError) {
+        throw error;
+      }
+      throw new SunoApiError(`Network or unexpected error: ${error instanceof Error ? error.message : 'Unknown error'}`, 'NETWORK_ERROR');
+    }
+  }
+
+  async getCreditsInfo(): Promise<{ credits_left: number; period: string; monthly_limit: number; monthly_usage: number }> {
+    if (!this.apiKey) {
+      throw new SunoApiError(
+        'Suno API key not configured',
+        'NO_API_KEY',
+        false,
+        true
+      );
+    }
+
+    try {
+      const response = await fetch(`${this.baseUrl}/api/v1/credits`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
           'Accept': 'application/json',
         },
       });
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('Quota API error:', errorText);
-        throw new SunoApiError(`Quota check error: ${response.status} - ${errorText}`, `HTTP_${response.status}`);
+        console.error('Suno API credits error:', errorText);
+        throw new SunoApiError(`Credits check error: ${response.status} - ${errorText}`, `HTTP_${response.status}`);
       }
 
-      const data = await response.json();
-      console.log('Quota response data:', data);
+      const rawResponse = await response.json();
 
-      // Return mock data structure if the API doesn't provide the expected format
-      return {
-        credits_left: data.credits_left || 100,
-        period: data.period || 'monthly',
-        monthly_limit: data.monthly_limit || 500,
-        monthly_usage: data.monthly_usage || 0,
-      };
+      // Check for API-level errors embedded in the response
+      if (rawResponse && rawResponse.code !== 200) {
+        const errorMessage = rawResponse.msg || 'Unknown API error';
+        console.error('Suno API credits error:', errorMessage);
+        throw new SunoApiError(errorMessage, rawResponse.code?.toString());
+      }
+
+      if (rawResponse && rawResponse.code === 200 && rawResponse.data !== undefined) {
+         console.log('Suno API credits response data:', rawResponse.data);
+         // Assuming credits info is directly in 'data'. Adjust if it's nested further.
+         return rawResponse.data;
+      } else {
+         throw new SunoApiError(`Unexpected response structure - ${JSON.stringify(rawResponse)}`, 'INVALID_RESPONSE');
+      }
     } catch (error) {
-      console.error('Quota check error:', error);
+      console.error('Suno API credits check error:', error);
       if (error instanceof SunoApiError) {
         throw error;
       }

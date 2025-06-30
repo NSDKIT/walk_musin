@@ -1,15 +1,14 @@
 import React, { useState } from 'react';
-import { Music, Play, Pause, Heart, Download, Search, Filter, Clock, MapPin, RefreshCw, AlertCircle } from 'lucide-react';
+import { Music, Play, Pause, Heart, Download, Search, Filter, Clock, MapPin } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 
 export function MusicLibrary() {
-  const { state, addToFavorites, checkCompletedTracks } = useApp();
-  const { tracks, favorites, error } = state;
+  const { state, addToFavorites } = useApp();
+  const { tracks, favorites } = state;
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState<'date' | 'title' | 'duration'>('date');
   const [filterStatus, setFilterStatus] = useState<'all' | 'completed' | 'generating'>('all');
   const [playingTrack, setPlayingTrack] = useState<string | null>(null);
-  const [isLoadingTracks, setIsLoadingTracks] = useState(false);
 
   // Filter and sort tracks
   const filteredTracks = tracks
@@ -40,17 +39,6 @@ export function MusicLibrary() {
     }
   };
 
-  const handleLoadCompletedTracks = async () => {
-    setIsLoadingTracks(true);
-    try {
-      await checkCompletedTracks();
-    } catch (error) {
-      console.error('Failed to load completed tracks:', error);
-    } finally {
-      setIsLoadingTracks(false);
-    }
-  };
-
   const formatDate = (date: Date) => {
     return new Date(date).toLocaleDateString('ja-JP', {
       year: 'numeric',
@@ -62,7 +50,7 @@ export function MusicLibrary() {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'completed': return 'text-green-600 bg-green-100';
-      case 'generating': return 'text-purple-600 bg-purple-100';
+      case 'generating': return 'text-yellow-600 bg-yellow-100';
       case 'failed': return 'text-red-600 bg-red-100';
       default: return 'text-gray-600 bg-gray-100';
     }
@@ -77,73 +65,17 @@ export function MusicLibrary() {
     }
   };
 
-  const generatingTracks = tracks.filter(track => track.status === 'generating').length;
-  const completedTracks = tracks.filter(track => track.status === 'completed').length;
-  const failedTracks = tracks.filter(track => track.status === 'failed').length;
-
-  // Empty state with load button
   if (tracks.length === 0) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-teal-50 via-white to-purple-50 p-8">
         <div className="max-w-4xl mx-auto">
-          {/* Header with Load Button - Even in Empty State */}
-          <div className="mb-8 flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900 mb-2">音楽ライブラリ</h1>
-              <p className="text-gray-600">あなたの歩行データから生成された楽曲コレクション</p>
-            </div>
-            
-            {/* Load Button - Always Visible */}
-            <button
-              onClick={handleLoadCompletedTracks}
-              disabled={isLoadingTracks}
-              className="flex items-center space-x-3 px-6 py-3 bg-gradient-to-r from-teal-500 to-purple-600 text-white rounded-xl font-bold hover:from-teal-600 hover:to-purple-700 transition-all transform hover:scale-105 shadow-lg disabled:opacity-50 disabled:transform-none"
-            >
-              <RefreshCw className={`w-5 h-5 ${isLoadingTracks ? 'animate-spin' : ''}`} />
-              <span>{isLoadingTracks ? '読み込み中...' : '楽曲読み込み'}</span>
-            </button>
-          </div>
-
-          {/* Error Notification */}
-          {error && (
-            <div className="mb-8 bg-red-50 border border-red-200 rounded-2xl p-6">
-              <div className="flex items-start space-x-3">
-                <AlertCircle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
-                <div className="flex-1">
-                  <h3 className="font-medium text-red-900">エラーが発生しました</h3>
-                  <p className="text-sm text-red-700 mt-1">{error}</p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Empty State Content */}
           <div className="text-center py-16">
             <div className="w-24 h-24 bg-gradient-to-r from-teal-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-6">
               <Music className="w-12 h-12 text-white" />
             </div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-4">まだ楽曲がありません</h2>
-            <p className="text-gray-500 mb-8">ウォーキングを開始して、あなただけの音楽を生成しましょう！</p>
-            
-            {/* Additional Load Button in Empty State */}
-            <div className="bg-blue-50 border border-blue-200 rounded-2xl p-6 max-w-md mx-auto">
-              <div className="flex items-center space-x-3 mb-4">
-                <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                  <RefreshCw className="w-5 h-5 text-blue-600" />
-                </div>
-                <div className="text-left">
-                  <h3 className="font-medium text-blue-900">楽曲を確認</h3>
-                  <p className="text-sm text-blue-700">生成済みの楽曲があるかチェックします</p>
-                </div>
-              </div>
-              <button
-                onClick={handleLoadCompletedTracks}
-                disabled={isLoadingTracks}
-                className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50"
-              >
-                {isLoadingTracks ? '確認中...' : '楽曲を読み込む'}
-              </button>
-            </div>
+            <h2 className="text-2xl font-bold text-gray-900 mb-4">音楽ライブラリ</h2>
+            <p className="text-gray-500 mb-8">まだ楽曲がありません</p>
+            <p className="text-sm text-gray-400">ウォーキングを開始して、あなただけの音楽を生成しましょう！</p>
           </div>
         </div>
       </div>
@@ -153,63 +85,11 @@ export function MusicLibrary() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-teal-50 via-white to-purple-50 p-8">
       <div className="max-w-6xl mx-auto">
-        {/* Header with Load Button */}
-        <div className="mb-8 flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">音楽ライブラリ</h1>
-            <p className="text-gray-600">あなたの歩行データから生成された楽曲コレクション</p>
-          </div>
-          
-          {/* Main Load Button - Always Visible */}
-          <button
-            onClick={handleLoadCompletedTracks}
-            disabled={isLoadingTracks}
-            className="flex items-center space-x-3 px-6 py-3 bg-gradient-to-r from-teal-500 to-purple-600 text-white rounded-xl font-bold hover:from-teal-600 hover:to-purple-700 transition-all transform hover:scale-105 shadow-lg disabled:opacity-50 disabled:transform-none"
-          >
-            <RefreshCw className={`w-5 h-5 ${isLoadingTracks ? 'animate-spin' : ''}`} />
-            <span>{isLoadingTracks ? '読み込み中...' : '楽曲読み込み'}</span>
-          </button>
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">音楽ライブラリ</h1>
+          <p className="text-gray-600">あなたの歩行データから生成された楽曲コレクション</p>
         </div>
-
-        {/* Error Notification */}
-        {error && (
-          <div className="mb-8 bg-red-50 border border-red-200 rounded-2xl p-6">
-            <div className="flex items-start space-x-3">
-              <AlertCircle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <h3 className="font-medium text-red-900">エラーが発生しました</h3>
-                <p className="text-sm text-red-700 mt-1">{error}</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Generating Tracks Notification */}
-        {generatingTracks > 0 && (
-          <div className="mb-8 bg-purple-50 border border-purple-200 rounded-2xl p-6">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
-                  <Music className="w-5 h-5 text-purple-600" />
-                </div>
-                <div>
-                  <h3 className="font-medium text-purple-900">生成中の楽曲があります</h3>
-                  <p className="text-sm text-purple-700">
-                    {generatingTracks}曲が生成中です。「楽曲読み込み」ボタンで完了した楽曲を確認できます。
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={handleLoadCompletedTracks}
-                disabled={isLoadingTracks}
-                className="flex items-center space-x-2 px-4 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 transition-colors disabled:opacity-50"
-              >
-                <RefreshCw className={`w-4 h-4 ${isLoadingTracks ? 'animate-spin' : ''}`} />
-                <span>{isLoadingTracks ? '確認中' : '今すぐ確認'}</span>
-              </button>
-            </div>
-          </div>
-        )}
 
         {/* Controls */}
         <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-6 border border-gray-200 mb-8">
@@ -255,7 +135,7 @@ export function MusicLibrary() {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-6 border border-gray-200">
             <div className="flex items-center justify-between">
               <div>
@@ -270,7 +150,9 @@ export function MusicLibrary() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-gray-600">完了済み</p>
-                <p className="text-2xl font-bold text-green-600">{completedTracks}</p>
+                <p className="text-2xl font-bold text-gray-900">
+                  {tracks.filter(t => t.status === 'completed').length}
+                </p>
               </div>
               <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
                 <span className="text-green-600 font-bold">✓</span>
@@ -281,20 +163,8 @@ export function MusicLibrary() {
           <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-6 border border-gray-200">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">生成中</p>
-                <p className="text-2xl font-bold text-purple-600">{generatingTracks}</p>
-              </div>
-              <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center">
-                <RefreshCw className="w-5 h-5 text-purple-600 animate-spin" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-6 border border-gray-200">
-            <div className="flex items-center justify-between">
-              <div>
                 <p className="text-sm font-medium text-gray-600">お気に入り</p>
-                <p className="text-2xl font-bold text-pink-600">{favorites.length}</p>
+                <p className="text-2xl font-bold text-gray-900">{favorites.length}</p>
               </div>
               <Heart className="w-8 h-8 text-pink-600" />
             </div>
@@ -388,17 +258,8 @@ export function MusicLibrary() {
 
                   {track.status === 'generating' && (
                     <div className="flex items-center space-x-2">
-                      <div className="animate-spin rounded-full h-6 w-6 border-2 border-purple-500 border-t-transparent"></div>
-                      <span className="text-sm text-purple-600">生成中...</span>
-                    </div>
-                  )}
-
-                  {track.status === 'failed' && (
-                    <div className="flex items-center space-x-2">
-                      <div className="w-6 h-6 bg-red-100 rounded-full flex items-center justify-center">
-                        <span className="text-red-600 text-xs">✗</span>
-                      </div>
-                      <span className="text-sm text-red-600">失敗</span>
+                      <div className="animate-spin rounded-full h-6 w-6 border-2 border-teal-500 border-t-transparent"></div>
+                      <span className="text-sm text-gray-500">生成中...</span>
                     </div>
                   )}
                 </div>
@@ -418,15 +279,15 @@ export function MusicLibrary() {
                       </div>
                       <div>
                         <span className="text-gray-500">時間帯</span>
-                        <p className="font-medium text-gray-900">{track.environmentData?.timeOfDay || '不明'}</p>
+                        <p className="font-medium text-gray-900">{track.environmentData.timeOfDay}</p>
                       </div>
                       <div>
                         <span className="text-gray-500">天気</span>
-                        <p className="font-medium text-gray-900">{track.environmentData?.weather.description || '不明'}</p>
+                        <p className="font-medium text-gray-900">{track.environmentData.weather.description}</p>
                       </div>
                       <div>
                         <span className="text-gray-500">場所</span>
-                        <p className="font-medium text-gray-900">{track.environmentData?.location.name || '不明'}</p>
+                        <p className="font-medium text-gray-900">{track.environmentData.location.name}</p>
                       </div>
                     </div>
                   </div>
